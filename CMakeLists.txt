@@ -10,8 +10,10 @@ find_package(Vulkan REQUIRED)
 
 add_library(mase_core STATIC
   Context/Context.cpp
+  Context/Swapchain.cpp
   Renderer/Renderer.cpp
   Window/Window.cpp
+  Mase/Mase.cpp
 )
 
 target_include_directories(mase_core PUBLIC

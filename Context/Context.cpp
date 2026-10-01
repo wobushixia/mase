@@ -1,27 +1,28 @@
 #include "Context.h"
+#include "Context/Swapchain.h"
 #include "Window/Window.h"
 #include "vulkan/vulkan.hpp"
+#include <SDL3/SDL_stdinc.h>
 #include <SDL3/SDL_vulkan.h>
 #include <cstdio>
 #include <iostream>
 #include <memory>
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
-#include <stdexcept>
+#include <ostream>
 #include <vector>
 #include <vulkan/vulkan_core.h>
 
-namespace mase{
+namespace mase {
 
-void Context::Init() {
-  m_window = std::make_unique<mase::Window>();
-  if(!m_window->GetWindow()) throw std::runtime_error("creare window failed");
-  std::cout<<m_window->GetWindow();
-  m_context.reset(new Context);
-}
+Context::Context() {}
 
 void Context::Shutdown() {
-  m_context.reset();
+  m_device.waitIdle();
+  m_swapchain.reset();
+  m_device.destroy();
+  m_instance.destroySurfaceKHR(m_surface);
+  m_instance.destroy();
   SDL_Quit();
 }
 
@@ -38,30 +39,42 @@ void Context::Update() {
 
 }
 
-Context::Context() {
+void Context::Init() {
+  m_window = std::make_unique<mase::Window>();
   createInstance();
+  createSurface();
   pickupPhysicalDevice();
   queryQueueFamily();
   createDevice();
   getQueues();
+  m_swapchain = std::make_unique<Swapchain>();
+}
+
+Context& Context::GetInstance() {
+    static Context instance;
+    return instance;
 }
 
 void Context::createSurface() {
   VkSurfaceKHR _surface;
 
-  std::cout << m_window->GetWindow();
-  //if(!SDL_Vulkan_CreateSurface(m_window->GetWindow(), m_instance, nullptr, &_surface)) throw std::runtime_error("create SDL3 surface FAILED");
-  //m_surface = vk::SurfaceKHR(_surface);
+  if(!SDL_Vulkan_CreateSurface(m_window->GetWindow(), m_instance, nullptr, &_surface)) throw std::runtime_error("create SDL3 surface FAILED");
+  m_surface = vk::SurfaceKHR(_surface);
 }
 
 void Context::createInstance() {
   vk::InstanceCreateInfo ci;
   const std::vector<const char *> layers = {"VK_LAYER_KHRONOS_validation"};
 
+  Uint32 sdlExtCount = 0;
+  const char* const* sdlExts = SDL_Vulkan_GetInstanceExtensions(&sdlExtCount);
+  std::vector extensions(sdlExts, sdlExts + sdlExtCount);
+  
   vk::ApplicationInfo ai;
-  ai.setApplicationVersion(VK_API_VERSION_1_4);
+  ai.setApiVersion(VK_API_VERSION_1_4);
   ci.setPApplicationInfo(&ai)
-    .setPEnabledLayerNames(layers);
+    .setPEnabledLayerNames(layers)
+    .setPEnabledExtensionNames(extensions);
 
   m_instance = vk::createInstance(ci);
 }
@@ -77,9 +90,11 @@ bool isDeviceSuitable(vk::PhysicalDevice const& device) {
 
 void Context::pickupPhysicalDevice() {
   auto devices = m_instance.enumeratePhysicalDevices();
+  m_phyDevice = devices[0];
 
   for(auto device : devices) {
     if(isDeviceSuitable(device)) m_phyDevice = device;
+    break;
   }
 }
 
@@ -91,37 +106,53 @@ void Context::queryQueueFamily() {
 
     if(queueFamily.queueFlags & vk::QueueFlagBits::eGraphics) {
       m_queueFamilyIndices.graphicsFamily = i;
-      break;
     }
+    if(m_phyDevice.getSurfaceSupportKHR(i, m_surface)) {
+      m_queueFamilyIndices.presentFamily = i;
+    }
+
+    if(m_queueFamilyIndices.isComplete()) break;
   }
 }
 
 void Context::createDevice() {
   vk::DeviceCreateInfo deviceCI;
-  vk::DeviceQueueCreateInfo queueCI;
+  std::vector<vk::DeviceQueueCreateInfo> queueCIs;
 
   float priorities = 1.0f;
 
-  queueCI.setPQueuePriorities(&priorities)
-         .setQueueCount(1)
-         .setQueueFamilyIndex(m_queueFamilyIndices.graphicsFamily.value());
-  deviceCI.setQueueCreateInfos(queueCI);
+  if(m_queueFamilyIndices.presentFamily == m_queueFamilyIndices.graphicsFamily) {
+    vk::DeviceQueueCreateInfo queueCI;
+    queueCI.setPQueuePriorities(&priorities)
+           .setQueueCount(1)
+           .setQueueFamilyIndex(m_queueFamilyIndices.graphicsFamily.value());
+    queueCIs.push_back(std::move(queueCI));
+  } else {
+    vk::DeviceQueueCreateInfo queueCI;
+    queueCI.setPQueuePriorities(&priorities)
+           .setQueueCount(1)
+           .setQueueFamilyIndex(m_queueFamilyIndices.graphicsFamily.value());
+    queueCIs.push_back(queueCI);
+    queueCI.setPQueuePriorities(&priorities)
+           .setQueueCount(1)
+           .setQueueFamilyIndex(m_queueFamilyIndices.presentFamily.value());
+    queueCIs.push_back(queueCI);
+  }
+
+  std::vector<const char*> deviceExtensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+
+  deviceCI.setQueueCreateInfos(queueCIs)
+          .setPEnabledExtensionNames(deviceExtensions);
 
   m_device = m_phyDevice.createDevice(deviceCI);
 }
 
 void Context::getQueues() {
   m_graphicsQueue = m_device.getQueue(m_queueFamilyIndices.graphicsFamily.value(), 0);
+  m_presentQueue = m_device.getQueue(m_queueFamilyIndices.presentFamily.value(), 0);
 }
 
-Context::~Context() {
-  m_device.destroy();
-  m_instance.destroy();
-}
-
-Context& Context::GetInstance() {
-  return *m_context;
-}
+Context::~Context() {}
 
 Window& Context::GetWindow() {
   return *m_window;

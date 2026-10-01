@@ -18,19 +18,12 @@ mase::Window::Window() {
   m_window = nullptr;
   m_renderer = nullptr;
 
-  if(!SDL_CreateWindowAndRenderer("mase", 800, 600, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_VULKAN, &m_window, &m_renderer)) {
-    SDL_Log("SDL: SDL_CreateWindowAndRenderer FAILED, %s", SDL_GetError());
-    return;
-  };
+  if(!SDL_CreateWindowAndRenderer("mase", 800, 600, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_VULKAN, &m_window, &m_renderer)) SDL_Log("%s", SDL_GetError());
 }
 
 mase::Window::~Window() {
-  SDL_DestroyRenderer(m_renderer);
   SDL_DestroyWindow(m_window);
-}
-
-SDL_Renderer* mase::Window::GetRenderer() {
-  return m_renderer;
+  SDL_DestroyRenderer(m_renderer);
 }
 
 SDL_Window* mase::Window::GetWindow() {

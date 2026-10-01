@@ -1,24 +1,12 @@
-#include "Context/Context.h"
-#include "Renderer/Renderer.h"
+#include "Mase/Mase.h"
 #include <SDL3/SDL_render.h>
-#include <memory>
+#include <vulkan/vulkan.hpp>
 
 int main() {
-  auto ctx = std::make_unique<mase::Context>();
+  auto& mase = Mase::GetInstance();
 
-  ctx->Init();
-  SDL_Renderer* renderer = ctx->GetWindow().GetRenderer();
-
-  while(!ctx->GetWindowShouldClose()) {
-    SDL_SetRenderDrawColor(renderer, 57, 197, 187, 255);
-    SDL_RenderClear(renderer);
-
-    SDL_RenderPresent(renderer);
-
-    ctx->Update();
-  }
-
-  ctx->Shutdown();
+  mase.run();
 
   return 0;
 }
+
