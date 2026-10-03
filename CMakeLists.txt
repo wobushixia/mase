@@ -8,6 +8,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 find_package(SDL3 REQUIRED)
 find_package(Vulkan REQUIRED)
 
+find_program(SLANG_PROGRAM slang REQUIRED)
+execute_process(COMMAND ${SLANG_PROGRAM} ${CMAKE_SOURCE_DIR}/Assets/shaders/shader.slang -o ${CMAKE_SOURCE_DIR}/Assets/shaders/shader.spv)
+
 add_library(mase_core STATIC
   Context/Context.cpp
   Context/Swapchain.cpp
