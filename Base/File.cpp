@@ -10,6 +10,8 @@ bool File::OpenFile(const std::string &file_path, const char* mode) {
 
   fopen(file_path.c_str(), mode);
 
+	m_fileSize = ftell(m_fp);
+
   if(!m_fp) {
     return false;
   }
@@ -32,7 +34,20 @@ void File::Close() {
   }
 }
 
-bool File::ReadAll(char *buffer) {
+bool File::ReadAll(std::vector<char>* buffer) {
+	if(buffer == nullptr) {
+		return false;
+	}
+
+	buffer->resize(m_fileSize)；
+	
+	if(fseek(m_fp, 0, SEEK_END) != 0) {
+		return false;
+	}
+	if(fread((*buffer).data(), m_fileSize) != 0) {
+		return false;
+	}
+
   return true;
 }
 

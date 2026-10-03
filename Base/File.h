@@ -20,7 +20,7 @@ public:
   bool OpenText(const std::string &file_path);
   bool OpenBinary(const std::string &file_path);
 
-  bool ReadAll(char* buffer);
+  bool ReadAll(std::vector<char>* buffer);
 
   void Close();
 
