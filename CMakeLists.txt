@@ -11,13 +11,14 @@ find_package(Vulkan REQUIRED)
 find_program(SLANG_PROGRAM slang REQUIRED)
 execute_process(COMMAND ${SLANG_PROGRAM} ${CMAKE_SOURCE_DIR}/Assets/shaders/shader.slang -o ${CMAKE_SOURCE_DIR}/Assets/shaders/shader.spv)
 
-add_library(mase_core STATIC
-  Context/Context.cpp
-  Context/Swapchain.cpp
-  Renderer/Renderer.cpp
-  Window/Window.cpp
-  Mase/Mase.cpp
+file(GLOB_RECURSE MASE_CORE_SOURCES 
+  Context/*.cpp
+  Base/*.cpp
+  Renderer/*.cpp
+  Window/*.cpp
+  Mase/*.cpp
 )
+add_library(mase_core STATIC ${MASE_CORE_SOURCES})
 
 target_include_directories(mase_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}

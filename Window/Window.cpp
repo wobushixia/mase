@@ -9,7 +9,7 @@
 #include <SDL3/SDL_vulkan.h>
 #include "Window.h"
 
-mase::Window::Window() {
+void mase::Window::Init() {
   if(!SDL_Init(SDL_INIT_VIDEO)) {
     SDL_Log("SDL: SDL_INIT FAILED, %s", SDL_GetError());
     return;
@@ -21,7 +21,7 @@ mase::Window::Window() {
   if(!SDL_CreateWindowAndRenderer("mase", 800, 600, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_VULKAN, &m_window, &m_renderer)) SDL_Log("%s", SDL_GetError());
 }
 
-mase::Window::~Window() {
+void mase::Window::Destroy() {
   SDL_DestroyWindow(m_window);
   SDL_DestroyRenderer(m_renderer);
 }

@@ -3,7 +3,6 @@
 #include "vulkan/vulkan.hpp"
 #include <SDL3/SDL_video.h>
 #include <algorithm>
-#include <array>
 #include <cstddef>
 #include <cstdint>
 
@@ -11,16 +10,19 @@ namespace mase {
 
 void Swapchain::querySwapchainInfo() {
   auto m_phyDevice = Context::GetInstance().m_phyDevice;
-  auto formats = m_phyDevice.getSurfaceFormatsKHR(Context::GetInstance().GetSurface());
+  auto formats =
+      m_phyDevice.getSurfaceFormatsKHR(Context::GetInstance().GetSurface());
   m_info.format = formats[0];
-  for(const auto& format : formats) {
-    if (format.format == vk::Format::eR8G8B8A8Srgb && format.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear) {
+  for (const auto &format : formats) {
+    if (format.format == vk::Format::eR8G8B8A8Srgb &&
+        format.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear) {
       m_info.format = format;
       break;
     }
   }
 
-  auto capabilities = m_phyDevice.getSurfaceCapabilitiesKHR(Context::GetInstance().GetSurface()); 
+  auto capabilities = m_phyDevice.getSurfaceCapabilitiesKHR(
+      Context::GetInstance().GetSurface());
 
   uint32_t imageCount = std::max(2u, capabilities.minImageCount);
   if (capabilities.maxImageCount != 0) {
@@ -31,16 +33,20 @@ void Swapchain::querySwapchainInfo() {
   int w = 0, h = 0;
   SDL_GetWindowSize(Context::GetInstance().GetWindow().GetWindow(), &w, &h);
 
-  m_info.imageExtent.width = std::clamp<uint32_t>(w, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
-  m_info.imageExtent.height = std::clamp<uint32_t>(h, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
+  m_info.imageExtent.width = std::clamp<uint32_t>(
+      w, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
+  m_info.imageExtent.height =
+      std::clamp<uint32_t>(h, capabilities.minImageExtent.height,
+                           capabilities.maxImageExtent.height);
 
   m_info.transform = capabilities.currentTransform;
 
-  auto presentModes = m_phyDevice.getSurfacePresentModesKHR(Context::GetInstance().GetSurface());
+  auto presentModes = m_phyDevice.getSurfacePresentModesKHR(
+      Context::GetInstance().GetSurface());
 
   m_info.presentMode = vk::PresentModeKHR::eFifo;
   for (auto presentMode : presentModes) {
-    if(presentMode == vk::PresentModeKHR::eMailbox) {
+    if (presentMode == vk::PresentModeKHR::eMailbox) {
       m_info.presentMode = presentMode;
       break;
     }
@@ -50,63 +56,82 @@ void Swapchain::querySwapchainInfo() {
 void Swapchain::createSwapchain() {
   vk::SwapchainCreateInfoKHR ci;
   ci.setClipped(true)
-    .setImageArrayLayers(1)
-    .setImageUsage(vk::ImageUsageFlagBits::eColorAttachment)
-    .setSurface(Context::GetInstance().GetSurface())
-    .setImageColorSpace(m_info.format.colorSpace)
-    .setImageFormat(m_info.format.format)
-    .setImageExtent(m_info.imageExtent)
-    .setMinImageCount(m_info.imageCount);
+      .setImageArrayLayers(1)
+      .setImageUsage(vk::ImageUsageFlagBits::eColorAttachment)
+      .setSurface(Context::GetInstance().GetSurface())
+      .setImageColorSpace(m_info.format.colorSpace)
+      .setImageFormat(m_info.format.format)
+      .setImageExtent(m_info.imageExtent)
+      .setMinImageCount(m_info.imageCount);
 
-  auto& queueIndices = Context::GetInstance().m_queueFamilyIndices;
-  if(queueIndices.graphicsFamily.value() == queueIndices.presentFamily.value()) {
-    ci.setQueueFamilyIndices(queueIndices.presentFamily.value())
-      .setImageSharingMode(vk::SharingMode::eExclusive) ;
-  } else {
-    std::array indices = { queueIndices.graphicsFamily.value(), queueIndices.presentFamily.value() };
-    ci.setQueueFamilyIndices(indices)
-      .setImageSharingMode(vk::SharingMode::eConcurrent);
-  }
+  auto &qfpIndex = Context::GetInstance().m_qfpIndex;
+  ci.setQueueFamilyIndices(qfpIndex).setImageSharingMode(
+      vk::SharingMode::eExclusive);
 
   m_swapchain = Context::GetInstance().m_device.createSwapchainKHR(ci);
 }
 
 void Swapchain::createImageViews() {
-  images = Context::GetInstance().m_device.getSwapchainImagesKHR(m_swapchain);
+  m_images = Context::GetInstance().m_device.getSwapchainImagesKHR(m_swapchain);
 
-  imageViews.resize(images.size());
-  for (size_t i = 0; i < imageViews.size(); i++) {
+  m_imageViews.resize(m_images.size());
+  for (size_t i = 0; i < m_imageViews.size(); i++) {
     vk::ImageViewCreateInfo ci;
     vk::ComponentMapping mapping;
     vk::ImageSubresourceRange range;
 
     range.setBaseArrayLayer(0)
-         .setLayerCount(1)
-         .setBaseMipLevel(0)
-         .setLevelCount(1)
-         .setAspectMask(vk::ImageAspectFlagBits::eColor);
-      
-    ci.setImage(images[i])
-      .setViewType(vk::ImageViewType::e2D)
-      .setComponents(mapping)
-      .setFormat(m_info.format.format)
-      .setSubresourceRange(range);
+        .setLayerCount(1)
+        .setBaseMipLevel(0)
+        .setLevelCount(1)
+        .setAspectMask(vk::ImageAspectFlagBits::eColor);
 
-    imageViews[i] = Context::GetInstance().m_device.createImageView(ci);
+    ci.setImage(m_images[i])
+        .setViewType(vk::ImageViewType::e2D)
+        .setComponents(mapping)
+        .setFormat(m_info.format.format)
+        .setSubresourceRange(range);
+
+    m_imageViews[i] = Context::GetInstance().m_device.createImageView(ci);
   }
 }
 
-Swapchain::Swapchain() {
+void Swapchain::transitionImageLayout(
+    vk::CommandBuffer cmdBuf, uint32_t imageIndex, vk::ImageLayout old_layout,
+    vk::ImageLayout new_layout, vk::AccessFlags2 src_access_mask,
+    vk::AccessFlags2 dst_access_mask, vk::PipelineStageFlags2 src_stage_mask,
+    vk::PipelineStageFlags2 dst_stage_mask) {
+  vk::ImageMemoryBarrier2 barrier = {
+      src_stage_mask,
+      src_access_mask,
+      dst_stage_mask,
+      dst_access_mask,
+      old_layout,
+      new_layout,
+      VK_QUEUE_FAMILY_IGNORED,
+      VK_QUEUE_FAMILY_IGNORED,
+      m_images[imageIndex],
+      {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}};
+
+  vk::DependencyInfo dependency_info;
+  dependency_info.setDependencyFlags({})
+      .setImageMemoryBarrierCount(1)
+      .setPImageMemoryBarriers(&barrier);
+
+  cmdBuf.pipelineBarrier2(dependency_info);
+}
+
+void Swapchain::Init() {
   querySwapchainInfo();
   createSwapchain();
   createImageViews();
 }
 
-Swapchain::~Swapchain() {
-  for (auto& imageView : imageViews)
+void Swapchain::Destroy() {
+  for (auto &imageView : m_imageViews)
     Context::GetInstance().m_device.destroyImageView(imageView);
 
   Context::GetInstance().m_device.destroySwapchainKHR(m_swapchain);
-} 
-
 }
+
+} // namespace mase
