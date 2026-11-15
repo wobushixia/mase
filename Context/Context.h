@@ -10,9 +10,17 @@
 #include "vulkan/vulkan.hpp"
 #include <SDL3/SDL_video.h>
 #include <cstdint>
+#include <vk_mem_alloc.h>
 #include <vulkan/vulkan.hpp>
+#include <vulkan/vulkan_core.h>
 
 namespace mase {
+
+struct Image {
+  VkImage img;
+  VkImageView imgView;
+  VmaAllocation allocation;
+};
 
 class Context {
 public:
@@ -46,6 +54,12 @@ public:
   Pipeline m_pipeline;
   CommandManager m_cmdMan;
   Renderer m_renderer;
+  VmaAllocator m_allocator;
+  Image m_depth;
+  struct GpuVertex {
+    VkBuffer buffer;
+    VmaAllocation allocation;
+  } vBuffer;
 
 private:
   void createWindow();
@@ -60,6 +74,9 @@ private:
   void createPipeline();
   void createCommandManager();
   void createRenderer();
+  void initVma();
+  void createDepthBuffer();
+  void loadModel();
 };
 
 } // namespace mase

@@ -7,49 +7,59 @@
 namespace mase {
 
 void Renderer::Init() {
-  m_cmdBuf = Context::GetInstance().m_cmdMan.allocCommandBuffers(1)[0];
+  m_cmdBufs =
+      Context::GetInstance().m_cmdMan.allocCommandBuffers(MAX_FRAMES_IN_FLIGHT);
 
   vk::SemaphoreCreateInfo sem_ci;
-  m_renderFinish = Context::GetInstance().m_device.createSemaphore(sem_ci);
-  m_presentComplete = Context::GetInstance().m_device.createSemaphore(sem_ci);
+  for (size_t i = 0; i < Context::GetInstance().m_swapchain.m_images.size();
+       i++) {
+    m_renderFinishSems.emplace_back(
+        Context::GetInstance().m_device.createSemaphore(sem_ci));
+  }
 
   vk::FenceCreateInfo fence_ci;
   fence_ci.setFlags(vk::FenceCreateFlagBits::eSignaled);
-  m_drawFence = Context::GetInstance().m_device.createFence(fence_ci);
+
+  for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+    m_presentCompleteSems.emplace_back(
+        Context::GetInstance().m_device.createSemaphore(sem_ci));
+    m_drawFences.emplace_back(
+        Context::GetInstance().m_device.createFence(fence_ci));
+  }
 }
 
 void Renderer::Render() {
   auto &instance = Context::GetInstance();
   auto &device = Context::GetInstance().m_device;
 
-  auto fenceRes = device.waitForFences(m_drawFence, VK_TRUE, UINT64_MAX);
+  auto fenceRes =
+      device.waitForFences(m_drawFences[m_frameInd], VK_TRUE, UINT64_MAX);
   if (fenceRes != vk::Result::eSuccess)
     throw std::runtime_error("wait for fence FAILED");
-  device.resetFences(m_drawFence);
+  device.resetFences(m_drawFences[m_frameInd]);
 
-  auto [res, imageInd] = device.acquireNextImageKHR(
-      instance.m_swapchain.m_swapchain, UINT64_MAX, m_presentComplete, nullptr);
+  auto [res, imageInd] =
+      device.acquireNextImageKHR(instance.m_swapchain.m_swapchain, UINT64_MAX,
+                                 m_presentCompleteSems[m_frameInd], nullptr);
 
   recordCommandBuffer(imageInd);
-
-  instance.m_queue.waitIdle(); // TODO: in flight
 
   vk::PipelineStageFlags waitDestinationStageMask(
       vk::PipelineStageFlagBits::eColorAttachmentOutput);
 
   vk::SubmitInfo submitI;
   submitI.setWaitSemaphoreCount(1)
-      .setPWaitSemaphores(&m_presentComplete)
+      .setPWaitSemaphores(&m_presentCompleteSems[m_frameInd])
       .setPWaitDstStageMask(&waitDestinationStageMask)
       .setCommandBufferCount(1)
-      .setPCommandBuffers(&m_cmdBuf)
+      .setPCommandBuffers(&m_cmdBufs[m_frameInd])
       .setSignalSemaphoreCount(1)
-      .setPSignalSemaphores(&m_renderFinish);
-  instance.m_queue.submit(submitI, m_drawFence);
+      .setPSignalSemaphores(&m_renderFinishSems[m_frameInd]);
+  instance.m_queue.submit(submitI, m_drawFences[m_frameInd]);
 
   vk::PresentInfoKHR presentInfoKHR;
   presentInfoKHR.setWaitSemaphoreCount(1)
-      .setPWaitSemaphores(&m_renderFinish)
+      .setPWaitSemaphores(&m_renderFinishSems[m_frameInd])
       .setSwapchainCount(1)
       .setPSwapchains(&instance.m_swapchain.m_swapchain)
       .setPImageIndices(&imageInd);
@@ -59,11 +69,14 @@ void Renderer::Render() {
     break;
   default:
     break; // an unexpected result is returned!
+
+    m_frameInd = (m_frameInd + 1) % MAX_FRAMES_IN_FLIGHT;
   }
 }
 
 void Renderer::recordCommandBuffer(uint32_t imageInd) {
   auto &instance = Context::GetInstance();
+  auto &m_cmdBuf = m_cmdBufs[m_frameInd];
 
   vk::CommandBufferBeginInfo bi{};
 
@@ -119,9 +132,20 @@ void Renderer::recordCommandBuffer(uint32_t imageInd) {
 
 void Renderer::Destroy() {
   auto &device = Context::GetInstance().m_device;
-  device.destroyFence(m_drawFence);
-  device.destroySemaphore(m_presentComplete);
-  device.destroySemaphore(m_renderFinish);
+
+  for (auto &fence : m_drawFences) {
+    device.destroyFence(fence);
+  }
+
+  for (auto &sem : m_presentCompleteSems) {
+    device.destroySemaphore(sem);
+  }
+
+  for (auto &sem : m_renderFinishSems) {
+    device.destroySemaphore(sem);
+  }
 }
+
+void Renderer::DrawLine(glm::vec3 p1, glm::vec3 p2) {}
 
 } // namespace mase
