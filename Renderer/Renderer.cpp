@@ -7,8 +7,8 @@
 namespace mase {
 
 void Renderer::Init() {
-  m_cmdBufs =
-      Context::GetInstance().m_cmdMan.allocCommandBuffers(MAX_FRAMES_IN_FLIGHT);
+  m_cmdBufs = Context::GetInstance().m_cmdMan.allocCommandBuffers(
+      Context::GetInstance().MAX_FRAMES_IN_FLIGHT);
 
   vk::SemaphoreCreateInfo sem_ci;
   for (size_t i = 0; i < Context::GetInstance().m_swapchain.m_images.size();
@@ -20,7 +20,7 @@ void Renderer::Init() {
   vk::FenceCreateInfo fence_ci;
   fence_ci.setFlags(vk::FenceCreateFlagBits::eSignaled);
 
-  for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+  for (size_t i = 0; i < Context::GetInstance().MAX_FRAMES_IN_FLIGHT; i++) {
     m_presentCompleteSems.emplace_back(
         Context::GetInstance().m_device.createSemaphore(sem_ci));
     m_drawFences.emplace_back(
@@ -54,12 +54,12 @@ void Renderer::Render() {
       .setCommandBufferCount(1)
       .setPCommandBuffers(&m_cmdBufs[m_frameInd])
       .setSignalSemaphoreCount(1)
-      .setPSignalSemaphores(&m_renderFinishSems[m_frameInd]);
+      .setPSignalSemaphores(&m_renderFinishSems[imageInd]);
   instance.m_queue.submit(submitI, m_drawFences[m_frameInd]);
 
   vk::PresentInfoKHR presentInfoKHR;
   presentInfoKHR.setWaitSemaphoreCount(1)
-      .setPWaitSemaphores(&m_renderFinishSems[m_frameInd])
+      .setPWaitSemaphores(&m_renderFinishSems[imageInd])
       .setSwapchainCount(1)
       .setPSwapchains(&instance.m_swapchain.m_swapchain)
       .setPImageIndices(&imageInd);
@@ -69,9 +69,8 @@ void Renderer::Render() {
     break;
   default:
     break; // an unexpected result is returned!
-
-    m_frameInd = (m_frameInd + 1) % MAX_FRAMES_IN_FLIGHT;
   }
+  m_frameInd = (m_frameInd + 1) % instance.MAX_FRAMES_IN_FLIGHT;
 }
 
 void Renderer::recordCommandBuffer(uint32_t imageInd) {
@@ -83,8 +82,9 @@ void Renderer::recordCommandBuffer(uint32_t imageInd) {
   m_cmdBuf.begin(bi);
 
   instance.m_swapchain.transitionImageLayout(
-      m_cmdBuf, imageInd, vk::ImageLayout::eUndefined,
-      vk::ImageLayout::eColorAttachmentOptimal, {},
+      m_cmdBuf, instance.m_swapchain.m_images[imageInd],
+      vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal,
+      vk::ImageAspectFlagBits::eColor, {},
       vk::AccessFlagBits2::eColorAttachmentWrite,
       vk::PipelineStageFlagBits2::eColorAttachmentOutput,
       vk::PipelineStageFlagBits2::eColorAttachmentOutput);
@@ -116,13 +116,23 @@ void Renderer::recordCommandBuffer(uint32_t imageInd) {
   m_cmdBuf.setScissor(
       0, vk::Rect2D(vk::Offset2D(0, 0), instance.m_swapchain.GetExtent()));
 
-  m_cmdBuf.draw(3, 1, 0, 0);
+  m_cmdBuf.pushConstants<VkDeviceAddress>(
+      instance.m_pipeline.m_pipelineLayout, vk::ShaderStageFlagBits::eVertex, 0,
+      instance.m_SDBufs[m_frameInd].deviceAddr);
+  vk::DeviceSize offset = 0;
+  vk::Buffer _vBuf = instance.vBuffer.buffer;
+  m_cmdBuf.bindVertexBuffers(0, 1, &_vBuf, &offset);
 
+  m_cmdBuf.bindIndexBuffer(instance.vBuffer.buffer, instance.m_bufSize,
+                           vk::IndexType::eUint16);
+
+  m_cmdBuf.drawIndexed(instance.m_indexCount, 1, 0, 0, 0);
   m_cmdBuf.endRendering();
 
   instance.m_swapchain.transitionImageLayout(
-      m_cmdBuf, imageInd, vk::ImageLayout::eColorAttachmentOptimal,
-      vk::ImageLayout::ePresentSrcKHR,
+      m_cmdBuf, instance.m_swapchain.m_images[imageInd],
+      vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::ePresentSrcKHR,
+      vk::ImageAspectFlagBits::eColor,
       vk::AccessFlagBits2::eColorAttachmentWrite, {},
       vk::PipelineStageFlagBits2::eColorAttachmentOutput,
       vk::PipelineStageFlagBits2::eBottomOfPipe);

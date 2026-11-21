@@ -26,13 +26,16 @@ void Pipeline::Init() {
   auto fragmentShaderModule = Context::GetInstance().m_shader.GetShaderModule();
   vk::PipelineShaderStageCreateInfo vertexShaderCI{}, fragmentShaderCI{};
   vertexShaderCI.setModule(vertexShaderModule)
-      .setPName("vertMain")
+      .setPName("main")
       .setStage(vk::ShaderStageFlagBits::eVertex);
   fragmentShaderCI.setModule(fragmentShaderModule)
-      .setPName("fragMain")
+      .setPName("main")
       .setStage(vk::ShaderStageFlagBits::eFragment);
   std::array stagesCI{vertexShaderCI, fragmentShaderCI};
   ci.setStages(stagesCI);
+
+  vk::PushConstantRange range{};
+  range.setStageFlags(vk::ShaderStageFlagBits::eVertex).setOffset(0).setSize(8);
 
   vk::PipelineViewportStateCreateInfo viewportCI{};
   vk::Viewport viewport(
@@ -46,6 +49,35 @@ void Pipeline::Init() {
       .setScissorCount(1)
       .setViewportCount(1);
   ci.setPViewportState(&viewportCI);
+
+  vk::VertexInputBindingDescription binding{};
+  binding.setBinding(0)
+      .setStride(sizeof(Vertex))
+      .setInputRate(vk::VertexInputRate::eVertex);
+
+  std::array<vk::VertexInputAttributeDescription, 3> attrs{};
+  attrs[0]
+      .setBinding(0)
+      .setLocation(0)
+      .setFormat(vk::Format::eR32G32B32Sfloat) // vec3 pos
+      .setOffset(offsetof(Vertex, pos));
+  attrs[1]
+      .setBinding(0)
+      .setLocation(1)
+      .setFormat(vk::Format::eR32G32B32Sfloat) // vec3 normal
+      .setOffset(offsetof(Vertex, normal));
+  attrs[2]
+      .setBinding(0)
+      .setLocation(2)
+      .setFormat(vk::Format::eR32G32Sfloat) // vec2 uv
+      .setOffset(offsetof(Vertex, uv));
+
+  vk::PipelineVertexInputStateCreateInfo vertexInput{};
+  vertexInput.setVertexBindingDescriptionCount(1)
+      .setPVertexBindingDescriptions(&binding)
+      .setVertexAttributeDescriptionCount(attrs.size())
+      .setPVertexAttributeDescriptions(attrs.data());
+  ci.setPVertexInputState(&vertexInput);
 
   vk::PipelineRasterizationStateCreateInfo rasterizationCI{};
   rasterizationCI.setCullMode(vk::CullModeFlagBits::eNone)
@@ -70,7 +102,7 @@ void Pipeline::Init() {
   ci.setPColorBlendState(&blendCI);
 
   vk::PipelineLayoutCreateInfo layoutCI{};
-  layoutCI.setSetLayoutCount(0).setPushConstantRangeCount(0);
+  layoutCI.setPushConstantRangeCount(1).setPPushConstantRanges(&range);
   m_pipelineLayout =
       Context::GetInstance().m_device.createPipelineLayout(layoutCI);
   if (!m_pipelineLayout) {

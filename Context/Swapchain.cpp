@@ -96,22 +96,24 @@ void Swapchain::createImageViews() {
   }
 }
 
-void Swapchain::transitionImageLayout(
-    vk::CommandBuffer cmdBuf, uint32_t imageIndex, vk::ImageLayout old_layout,
-    vk::ImageLayout new_layout, vk::AccessFlags2 src_access_mask,
-    vk::AccessFlags2 dst_access_mask, vk::PipelineStageFlags2 src_stage_mask,
-    vk::PipelineStageFlags2 dst_stage_mask) {
-  vk::ImageMemoryBarrier2 barrier = {
-      src_stage_mask,
-      src_access_mask,
-      dst_stage_mask,
-      dst_access_mask,
-      old_layout,
-      new_layout,
-      VK_QUEUE_FAMILY_IGNORED,
-      VK_QUEUE_FAMILY_IGNORED,
-      m_images[imageIndex],
-      {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}};
+void Swapchain::transitionImageLayout(vk::CommandBuffer cmdBuf, vk::Image img,
+                                      vk::ImageLayout old_layout,
+                                      vk::ImageLayout new_layout,
+                                      vk::ImageAspectFlags aspect_mask,
+                                      vk::AccessFlags2 src_access_mask,
+                                      vk::AccessFlags2 dst_access_mask,
+                                      vk::PipelineStageFlags2 src_stage_mask,
+                                      vk::PipelineStageFlags2 dst_stage_mask) {
+  vk::ImageMemoryBarrier2 barrier = {src_stage_mask,
+                                     src_access_mask,
+                                     dst_stage_mask,
+                                     dst_access_mask,
+                                     old_layout,
+                                     new_layout,
+                                     VK_QUEUE_FAMILY_IGNORED,
+                                     VK_QUEUE_FAMILY_IGNORED,
+                                     img,
+                                     {aspect_mask, 0, 1, 0, 1}};
 
   vk::DependencyInfo dependency_info;
   dependency_info.setDependencyFlags({})

@@ -8,8 +8,6 @@
 #include <vector>
 #include <vulkan/vulkan.hpp>
 
-constexpr int MAX_FRAMES_IN_FLIGHT = 2;
-
 namespace mase {
 
 class Renderer {

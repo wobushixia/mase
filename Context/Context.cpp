@@ -1,7 +1,10 @@
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 #define VMA_IMPLEMENTATION
 #define TINYOBJLOADER_IMPLEMENTATION
-#include "Context/Context.h"
 #include "Base/File.h"
+#include "Context/Context.h"
 #include "Context/Shader.h"
 #include "Context/Swapchain.h"
 #include "Context/tiny_obj_loader.h"
@@ -11,7 +14,7 @@
 #include <SDL3/SDL_main.h>
 #include <SDL3/SDL_stdinc.h>
 #include <SDL3/SDL_vulkan.h>
-#include <cstdio>
+#include <cstring>
 #include <stdexcept>
 #include <vector>
 #include <vk_mem_alloc.h>
@@ -19,19 +22,36 @@
 
 namespace mase {
 
-struct ShaderData {
-  glm::mat4 projection;
-  glm::mat4 view;
-  glm::mat4 model[3];
-  glm::vec4 lightPos{0.0f, -10.0f, 10.0f, 0.0f};
-} shaderData{};
-
 Context::Context() {}
 
 void Context::Shutdown() {
   m_device.waitIdle();
 
+  if (m_depth.imgView) {
+    m_device.destroyImageView(m_depth.imgView);
+    m_depth.imgView = VK_NULL_HANDLE;
+  }
+
+  if (m_depth.img != VK_NULL_HANDLE) {
+    vmaDestroyImage(m_allocator, m_depth.img, m_depth.allocation);
+    m_depth.img = VK_NULL_HANDLE;
+    m_depth.allocation = VK_NULL_HANDLE;
+  }
+
+  if (vBuffer.buffer != VK_NULL_HANDLE) {
+    vmaDestroyBuffer(m_allocator, vBuffer.buffer, vBuffer.allocation);
+    vBuffer.buffer = VK_NULL_HANDLE;
+  }
+
+  for (auto &sd : m_SDBufs) {
+    if (sd.buf != VK_NULL_HANDLE) {
+      vmaDestroyBuffer(m_allocator, sd.buf, sd.alloc);
+      sd.buf = VK_NULL_HANDLE;
+    }
+  }
+
   vmaDestroyAllocator(m_allocator);
+
   m_renderer.Destroy();
   m_cmdMan.Destroy();
   m_pipeline.Destroy();
@@ -56,7 +76,6 @@ void Context::Update() {
   }
 
   m_renderer.Render();
-  m_device.waitIdle();
 }
 
 void Context::Init() {
@@ -67,119 +86,198 @@ void Context::Init() {
   queryQueueFamily();
   createDevice();
   getQueues();
+  initVma();
   createSwapchain();
   createShaders();
   createPipeline();
   createCommandManager();
   createRenderer();
-  initVma();
   createDepthBuffer();
   loadModel();
+  createSDBuffers();
+  updateSDBuffers();
 }
 
-struct Vertex {
-  glm::vec3 pos;
-  glm::vec3 normal;
-  glm::vec2 uv;
-};
+void Context::createSDBuffers() {
+  m_SDBufs.resize(MAX_FRAMES_IN_FLIGHT);
+  for (auto i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+    VkBufferCreateInfo uBufferCI{.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                                 .size = sizeof(ShaderData),
+                                 .usage =
+                                     VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+                                     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT};
+
+    VmaAllocationCreateInfo uBufferAllocCI{
+        .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                 VMA_ALLOCATION_CREATE_MAPPED_BIT,
+        .usage = VMA_MEMORY_USAGE_AUTO};
+
+    vmaCreateBuffer(m_allocator, &uBufferCI, &uBufferAllocCI, &m_SDBufs[i].buf,
+                    &m_SDBufs[i].alloc, &m_SDBufs[i].allocInfo);
+
+    VkBufferDeviceAddressInfo uBufferBdaInfo{
+        .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+        .buffer = m_SDBufs[i].buf};
+    m_SDBufs[i].deviceAddr =
+        vkGetBufferDeviceAddress(m_device, &uBufferBdaInfo);
+  }
+}
+
+void Context::updateSDBuffers() {
+  const float aspect = static_cast<float>(m_swapchain.GetExtent().width) /
+                       static_cast<float>(m_swapchain.GetExtent().height);
+
+  ShaderData sd{};
+  sd.projection = glm::perspective(glm::radians(45.0f),
+                                   (float)m_swapchain.GetExtent().width /
+                                       (float)m_swapchain.GetExtent().height,
+                                   0.1f, 32.0f);
+  sd.view =
+      glm::lookAt(glm::vec3(0.0f, 0.0f, 8.0f), glm::vec3(0.0f, 0.0f, 0.0f),
+                  glm::vec3(0.0f, 1.0f, 0.0f));
+  for (auto i = 0; i < 3; i++) {
+    auto instancePos = glm::vec3((float)(i - 1) * 3.0f, 0.0f, 0.0f);
+    sd.model[i] = glm::mat4(1.0f);
+  }
+
+  for (auto i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+    memcpy(m_SDBufs[i].allocInfo.pMappedData, &sd, sizeof(ShaderData));
+    vmaFlushAllocation(m_allocator, m_SDBufs[i].alloc, 0, sizeof(ShaderData));
+  }
+}
 
 void Context::loadModel() {
   tinyobj::attrib_t attrib;
   std::vector<tinyobj::shape_t> shapes;
   std::vector<tinyobj::material_t> materials;
-  tinyobj::LoadObj(&attrib, &shapes, &materials, nullptr, nullptr,
-                   "../Assets/models/model.obj");
-
-  const VkDeviceSize indexCount{shapes[0].mesh.indices.size()};
-  std::vector<Vertex> vertices{};
-  std::vector<uint16_t> indices{};
-
-  for (auto &index : shapes[0].mesh.indices) {
-    Vertex v{.pos = {attrib.vertices[index.vertex_index * 3],
-                     -attrib.vertices[index.vertex_index * 3 + 1],
-                     attrib.vertices[index.vertex_index * 3 + 2]},
-             .normal = {attrib.normals[index.normal_index * 3],
-                        -attrib.normals[index.normal_index * 3 + 1],
-                        attrib.normals[index.normal_index * 3 + 2]},
-             .uv = {attrib.texcoords[index.texcoord_index * 2],
-                    1.0 - attrib.texcoords[index.texcoord_index * 2 + 1]}};
-    vertices.push_back(v);
-    indices.push_back(indices.size());
+  std::string warn, err;
+  if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err,
+                        "../Assets/models/suzanne.obj")) {
+    throw std::runtime_error("load obj failed: " + warn + err);
   }
 
-  VkDeviceSize vBufSize{sizeof(Vertex) * vertices.size()};
-  VkDeviceSize iBufSize{sizeof(uint16_t) * indices.size()};
+  std::vector<Vertex> vertices;
+  std::vector<uint32_t> indices;
+
+  for (auto &shape : shapes) {
+    for (auto &index : shape.mesh.indices) {
+      Vertex v{};
+      v.pos = {attrib.vertices[index.vertex_index * 3],
+               -attrib.vertices[index.vertex_index * 3 + 1],
+               attrib.vertices[index.vertex_index * 3 + 2]};
+      if (index.normal_index >= 0) {
+        v.normal = {attrib.normals[index.normal_index * 3],
+                    -attrib.normals[index.normal_index * 3 + 1],
+                    attrib.normals[index.normal_index * 3 + 2]};
+      }
+      if (index.texcoord_index >= 0) {
+        v.uv = {attrib.texcoords[index.texcoord_index * 2],
+                1.0f - attrib.texcoords[index.texcoord_index * 2 + 1]};
+      }
+      indices.push_back(static_cast<uint32_t>(vertices.size()));
+      vertices.push_back(v);
+    }
+  }
+
+  m_indexCount = static_cast<uint32_t>(indices.size());
+
+  VkDeviceSize vBufSize = sizeof(Vertex) * vertices.size();
+  VkDeviceSize iBufSize = sizeof(uint32_t) * indices.size();
+  m_bufSize = vBufSize;
+
   VkBufferCreateInfo bufferCI{.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                               .size = vBufSize + iBufSize,
                               .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
-                                       VK_BUFFER_USAGE_INDEX_BUFFER_BIT};
+                                       VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                                       VK_BUFFER_USAGE_TRANSFER_DST_BIT};
 
   VmaAllocationCreateInfo vBufferAllocCI{
       .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
-               VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT |
                VMA_ALLOCATION_CREATE_MAPPED_BIT,
       .usage = VMA_MEMORY_USAGE_AUTO};
+
   VmaAllocationInfo vBufferAllocInfo{};
   vmaCreateBuffer(m_allocator, &bufferCI, &vBufferAllocCI, &vBuffer.buffer,
                   &vBuffer.allocation, &vBufferAllocInfo);
 
   memcpy(vBufferAllocInfo.pMappedData, vertices.data(), vBufSize);
-  memcpy(((char *)vBufferAllocInfo.pMappedData) + vBufSize, indices.data(),
-         iBufSize);
+  memcpy(reinterpret_cast<char *>(vBufferAllocInfo.pMappedData) + vBufSize,
+         indices.data(), iBufSize);
+
+  vmaFlushAllocation(m_allocator, vBuffer.allocation, 0, VK_WHOLE_SIZE);
+
+  vBuffer.vertexOffset = 0;
+  vBuffer.indexOffset = vBufSize;
 }
 
 void Context::createDepthBuffer() {
-  std::vector<VkFormat> depthFormatList{VK_FORMAT_D32_SFLOAT_S8_UINT,
-                                        VK_FORMAT_D24_UNORM_S8_UINT};
-  VkFormat depthFormat{VK_FORMAT_UNDEFINED};
-  for (VkFormat &format : depthFormatList) {
-    VkFormatProperties2 formatProperties{
-        .sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2};
-    vkGetPhysicalDeviceFormatProperties2(m_phyDevice, format,
-                                         &formatProperties);
-    if (formatProperties.formatProperties.optimalTilingFeatures &
-        VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) {
+  std::vector<vk::Format> depthFormatList{vk::Format::eD32SfloatS8Uint,
+                                          vk::Format::eD24UnormS8Uint};
+  vk::Format depthFormat = vk::Format::eUndefined;
+  for (auto format : depthFormatList) {
+    auto props = m_phyDevice.getFormatProperties(format);
+    if (props.optimalTilingFeatures &
+        vk::FormatFeatureFlagBits::eDepthStencilAttachment) {
       depthFormat = format;
       break;
     }
   }
+  if (depthFormat == vk::Format::eUndefined)
+    throw std::runtime_error("no depth format available");
 
-  VkImageCreateInfo depthImageCI{
-      .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-      .imageType = VK_IMAGE_TYPE_2D,
-      .format = depthFormat,
-      .extent{.width = static_cast<uint32_t>(m_swapchain.GetExtent().width),
-              .height = static_cast<uint32_t>(m_swapchain.GetExtent().height),
-              .depth = 1},
-      .mipLevels = 1,
-      .arrayLayers = 1,
-      .samples = VK_SAMPLE_COUNT_1_BIT,
-      .tiling = VK_IMAGE_TILING_OPTIMAL,
-      .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-      .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-  };
+  auto extent = m_swapchain.GetExtent();
 
-  VmaAllocationCreateInfo allocCI{
-      .flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT,
-      .usage = VMA_MEMORY_USAGE_AUTO};
-  vmaCreateImage(m_allocator, &depthImageCI, &allocCI, &m_depth.img,
-                 &m_depth.allocation, nullptr);
+  vk::ImageCreateInfo depthImageCI;
+  depthImageCI.setImageType(vk::ImageType::e2D)
+      .setFormat(depthFormat)
+      .setExtent({extent.width, extent.height, 1})
+      .setMipLevels(1)
+      .setArrayLayers(1)
+      .setSamples(vk::SampleCountFlagBits::e1)
+      .setTiling(vk::ImageTiling::eOptimal)
+      .setUsage(vk::ImageUsageFlagBits::eDepthStencilAttachment)
+      .setInitialLayout(vk::ImageLayout::eUndefined);
 
-  VkImageViewCreateInfo depthViewCI{
-      .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-      .image = m_depth.img,
-      .viewType = VK_IMAGE_VIEW_TYPE_2D,
-      .format = depthFormat,
-      .subresourceRange{.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
-                        .levelCount = 1,
-                        .layerCount = 1}};
-  vkCreateImageView(m_device, &depthViewCI, nullptr, &m_depth.imgView);
+  VmaAllocationCreateInfo allocCI{};
+  allocCI.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
+  allocCI.usage = VMA_MEMORY_USAGE_AUTO;
+
+  VkImage rawImage = VK_NULL_HANDLE;
+  vmaCreateImage(m_allocator,
+                 reinterpret_cast<const VkImageCreateInfo *>(&depthImageCI),
+                 &allocCI, &rawImage, &m_depth.allocation, nullptr);
+  m_depth.img = vk::Image(rawImage);
+
+  vk::ImageViewCreateInfo depthViewCI;
+  depthViewCI.setImage(m_depth.img)
+      .setViewType(vk::ImageViewType::e2D)
+      .setFormat(depthFormat)
+      .setSubresourceRange(vk::ImageSubresourceRange{}
+                               .setAspectMask(vk::ImageAspectFlagBits::eDepth)
+                               .setBaseMipLevel(0)
+                               .setLevelCount(1)
+                               .setBaseArrayLayer(0)
+                               .setLayerCount(1));
+  m_depth.imgView = m_device.createImageView(depthViewCI);
+
+  auto cmd = m_cmdMan.BeginSingleTimeCommands();
+
+  vk::ImageAspectFlags depthAspect =
+      vk::ImageAspectFlagBits::eDepth | vk::ImageAspectFlagBits::eStencil;
+  m_swapchain.transitionImageLayout(
+      cmd, m_depth.img, vk::ImageLayout::eUndefined,
+      vk::ImageLayout::eDepthStencilAttachmentOptimal, depthAspect,
+      vk::AccessFlagBits2::eNone,
+      vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+      vk::PipelineStageFlagBits2::eTopOfPipe,
+      vk::PipelineStageFlagBits2::eEarlyFragmentTests);
+
+  m_cmdMan.EndSingleTimeCommands(cmd);
 }
 
 void Context::initVma() {
   VmaVulkanFunctions vkFunctions{.vkGetInstanceProcAddr = vkGetInstanceProcAddr,
-                                 .vkGetDeviceProcAddr = vkGetDeviceProcAddr,
-                                 .vkCreateImage = vkCreateImage};
+                                 .vkGetDeviceProcAddr = vkGetDeviceProcAddr};
   VmaAllocatorCreateInfo allocatorCI{
       .flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
       .physicalDevice = m_phyDevice,
@@ -206,7 +304,6 @@ Context &Context::GetInstance() {
 
 void Context::createSurface() {
   VkSurfaceKHR _surface;
-
   if (!SDL_Vulkan_CreateSurface(m_window.GetWindow(), m_instance, nullptr,
                                 &_surface))
     throw std::runtime_error("create SDL3 surface FAILED");
@@ -219,7 +316,7 @@ void Context::createInstance() {
 
   Uint32 sdlExtCount = 0;
   const char *const *sdlExts = SDL_Vulkan_GetInstanceExtensions(&sdlExtCount);
-  std::vector extensions(sdlExts, sdlExts + sdlExtCount);
+  std::vector<const char *> extensions(sdlExts, sdlExts + sdlExtCount);
 
   vk::ApplicationInfo ai;
   ai.setApiVersion(VK_API_VERSION_1_4);
@@ -232,36 +329,55 @@ void Context::createInstance() {
 
 bool isDeviceSuitable(vk::PhysicalDevice const &device) {
   auto features = device.getFeatures();
+  if (!features.geometryShader)
+    return false;
 
-  if (features.geometryShader)
-    return true;
+  auto exts = device.enumerateDeviceExtensionProperties();
+  bool hasSwapchain = false;
+  for (auto &e : exts) {
+    if (std::strcmp(e.extensionName, VK_KHR_SWAPCHAIN_EXTENSION_NAME) == 0) {
+      hasSwapchain = true;
+      break;
+    }
+  }
+  if (!hasSwapchain)
+    return false;
 
-  return false;
+  return true;
 }
 
 void Context::pickupPhysicalDevice() {
   auto devices = m_instance.enumeratePhysicalDevices();
-  m_phyDevice = devices[0];
+  if (devices.empty())
+    throw std::runtime_error("no Vulkan device");
 
-  for (auto device : devices) {
-    if (isDeviceSuitable(device))
+  m_phyDevice = devices[0];
+  bool found = false;
+  for (auto &device : devices) {
+    if (isDeviceSuitable(device)) {
       m_phyDevice = device;
-    break;
+      found = true;
+      break;
+    }
   }
+  if (!found)
+    throw std::runtime_error("no suitable Vulkan device");
 }
 
 void Context::queryQueueFamily() {
   auto queueFamilies = m_phyDevice.getQueueFamilyProperties();
+  m_qfpIndex = UINT32_MAX;
 
-  for (size_t i = 0; i < queueFamilies.size(); i++) {
+  for (uint32_t i = 0; i < queueFamilies.size(); i++) {
     const auto &queueFamily = queueFamilies[i];
-
-    if (queueFamily.queueFlags & vk::QueueFlagBits::eGraphics &&
+    if ((queueFamily.queueFlags & vk::QueueFlagBits::eGraphics) &&
         m_phyDevice.getSurfaceSupportKHR(i, m_surface)) {
       m_qfpIndex = i;
       break;
     }
   }
+  if (m_qfpIndex == UINT32_MAX)
+    throw std::runtime_error("no suitable queue family");
 }
 
 void Context::createDevice() {
@@ -269,30 +385,29 @@ void Context::createDevice() {
   std::vector<vk::DeviceQueueCreateInfo> queueCIs;
 
   float priorities = 1.0f;
-
   vk::DeviceQueueCreateInfo queueCI;
   queueCI.setPQueuePriorities(&priorities)
       .setQueueCount(1)
       .setQueueFamilyIndex(m_qfpIndex);
-  queueCIs.push_back(std::move(queueCI));
+  queueCIs.push_back(queueCI);
 
   std::vector<const char *> deviceExtensions = {
       VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 
-  deviceCI.setQueueCreateInfos(queueCIs).setPEnabledExtensionNames(
-      deviceExtensions);
-
-  vk::PhysicalDeviceVulkan11Features features11;
-  features11.setShaderDrawParameters(true);
-  deviceCI.pNext = &features11;
+  vk::PhysicalDeviceVulkan12Features features12;
+  features12.setBufferDeviceAddress(true);
 
   vk::PhysicalDeviceDynamicRenderingFeatures dynFeatures;
   dynFeatures.setDynamicRendering(true);
-  features11.pNext = &dynFeatures;
+  features12.pNext = &dynFeatures;
 
-  vk::PhysicalDeviceSynchronization2Features sync2Features{};
-  sync2Features.synchronization2 = VK_TRUE;
+  vk::PhysicalDeviceSynchronization2Features sync2Features;
+  sync2Features.setSynchronization2(true);
   dynFeatures.pNext = &sync2Features;
+
+  deviceCI.setQueueCreateInfos(queueCIs)
+      .setPEnabledExtensionNames(deviceExtensions)
+      .setPNext(&features12);
 
   m_device = m_phyDevice.createDevice(deviceCI);
 }
@@ -302,7 +417,7 @@ void Context::getQueues() { m_queue = m_device.getQueue(m_qfpIndex, 0); }
 void Context::createShaders() {
   File shaderFile;
   if (!shaderFile.OpenBinary("../Assets/shaders/slang.spv"))
-    throw std::runtime_error("Failed to open file");
+    throw std::runtime_error("Failed to open shader file");
   std::string shaderCode;
   shaderFile.ReadAll(&shaderCode);
   m_shader.Create(shaderCode);

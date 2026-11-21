@@ -23,9 +23,10 @@ public:
   void Init();
   void Destroy();
   vk::Extent2D GetExtent() { return m_info.imageExtent; }
-  void transitionImageLayout(vk::CommandBuffer cmdBuf, uint32_t imageIndex,
+  void transitionImageLayout(vk::CommandBuffer cmdBuf, vk::Image img,
                              vk::ImageLayout old_layout,
                              vk::ImageLayout new_layout,
+                             vk::ImageAspectFlags aspect_mask,
                              vk::AccessFlags2 src_access_mask,
                              vk::AccessFlags2 dst_access_mask,
                              vk::PipelineStageFlags2 src_stage_mask,

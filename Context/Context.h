@@ -10,16 +10,37 @@
 #include "vulkan/vulkan.hpp"
 #include <SDL3/SDL_video.h>
 #include <cstdint>
+#include <vector>
 #include <vk_mem_alloc.h>
 #include <vulkan/vulkan.hpp>
 #include <vulkan/vulkan_core.h>
 
 namespace mase {
 
+struct Vertex {
+  glm::vec3 pos;
+  glm::vec3 normal;
+  glm::vec2 uv;
+};
+
 struct Image {
   VkImage img;
   VkImageView imgView;
   VmaAllocation allocation;
+};
+
+struct ShaderData {
+  glm::mat4 projection;
+  glm::mat4 view;
+  glm::mat4 model[3];
+  glm::vec4 lightPos{0.0f, -10.0f, 10.0f, 0.0f};
+};
+
+struct ShaderDataBuffer {
+  VmaAllocation alloc{VK_NULL_HANDLE};
+  VmaAllocationInfo allocInfo{};
+  VkBuffer buf{VK_NULL_HANDLE};
+  VkDeviceAddress deviceAddr{};
 };
 
 class Context {
@@ -44,6 +65,8 @@ public:
   SDL_Event m_event;
   bool m_windowShouldClose;
 
+  const int MAX_FRAMES_IN_FLIGHT = 2;
+
   vk::Instance m_instance;
   vk::PhysicalDevice m_phyDevice;
   uint32_t m_qfpIndex = 0;
@@ -59,7 +82,11 @@ public:
   struct GpuVertex {
     VkBuffer buffer;
     VmaAllocation allocation;
+    VkDeviceSize vertexOffset;
+    VkDeviceSize indexOffset;
   } vBuffer;
+  VkDeviceSize m_indexCount, m_bufSize;
+  std::vector<ShaderDataBuffer> m_SDBufs;
 
 private:
   void createWindow();
@@ -77,6 +104,8 @@ private:
   void initVma();
   void createDepthBuffer();
   void loadModel();
+  void createSDBuffers();
+  void updateSDBuffers();
 };
 
 } // namespace mase
