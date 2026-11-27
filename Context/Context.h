@@ -6,6 +6,7 @@
 #include "Context/Shader.h"
 #include "Context/Swapchain.h"
 #include "Renderer/Renderer.h"
+#include "UI/Ui.h"
 #include "Window/Window.h"
 #include "vulkan/vulkan.hpp"
 #include <SDL3/SDL_video.h>
@@ -17,6 +18,13 @@
 
 namespace mase {
 
+struct GpuVertex {
+  VkBuffer buffer;
+  VmaAllocation allocation;
+  VkDeviceSize vertexOffset;
+  VkDeviceSize indexOffset;
+};
+
 struct Vertex {
   glm::vec3 pos;
   glm::vec3 normal;
@@ -24,6 +32,7 @@ struct Vertex {
 };
 
 struct Image {
+  VkFormat format;
   VkImage img;
   VkImageView imgView;
   VmaAllocation allocation;
@@ -32,7 +41,7 @@ struct Image {
 struct ShaderData {
   glm::mat4 projection;
   glm::mat4 view;
-  glm::mat4 model[3];
+  glm::mat4 model;
   glm::vec4 lightPos{0.0f, -10.0f, 10.0f, 0.0f};
 };
 
@@ -79,14 +88,10 @@ public:
   Renderer m_renderer;
   VmaAllocator m_allocator;
   Image m_depth;
-  struct GpuVertex {
-    VkBuffer buffer;
-    VmaAllocation allocation;
-    VkDeviceSize vertexOffset;
-    VkDeviceSize indexOffset;
-  } vBuffer;
-  VkDeviceSize m_indexCount, m_bufSize;
+  GpuVertex vBuffer;
+  VkDeviceSize m_indexCount;
   std::vector<ShaderDataBuffer> m_SDBufs;
+  UiManager m_uiMan;
 
 private:
   void createWindow();
@@ -106,6 +111,9 @@ private:
   void loadModel();
   void createSDBuffers();
   void updateSDBuffers();
+  void createUiManager();
+
+  void RenderUi();
 };
 
 } // namespace mase

@@ -87,6 +87,14 @@ void Pipeline::Init() {
       .setLineWidth(1.0f);
   ci.setPRasterizationState(&rasterizationCI);
 
+  vk::PipelineDepthStencilStateCreateInfo depthStencilCI;
+  depthStencilCI.setDepthTestEnable(VK_TRUE)
+      .setDepthWriteEnable(VK_TRUE)
+      .setDepthCompareOp(vk::CompareOp::eLess)
+      .setDepthBoundsTestEnable(VK_FALSE)
+      .setStencilTestEnable(VK_FALSE);
+  ci.setPDepthStencilState(&depthStencilCI);
+
   vk::PipelineMultisampleStateCreateInfo msCI{};
   msCI.setSampleShadingEnable(false).setRasterizationSamples(
       vk::SampleCountFlagBits::e1);
@@ -117,8 +125,11 @@ void Pipeline::Init() {
       .setPDynamicStates(dynamicStates.data());
   ci.setPDynamicState(&dynamicState);
 
-  renderingCI.setColorAttachmentCount(1).setPColorAttachmentFormats(
-      &Context::GetInstance().m_swapchain.m_info.format.format);
+  renderingCI.setColorAttachmentCount(1)
+      .setPColorAttachmentFormats(
+          &Context::GetInstance().m_swapchain.m_info.format.format)
+      .setDepthAttachmentFormat(
+          vk::Format(Context::GetInstance().m_depth.format));
 
   auto res =
       Context::GetInstance().m_device.createGraphicsPipeline(nullptr, ci);

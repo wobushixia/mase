@@ -52,6 +52,7 @@ void Context::Shutdown() {
 
   vmaDestroyAllocator(m_allocator);
 
+  m_uiMan.Destroy();
   m_renderer.Destroy();
   m_cmdMan.Destroy();
   m_pipeline.Destroy();
@@ -66,6 +67,7 @@ void Context::Shutdown() {
 
 void Context::Update() {
   while (SDL_PollEvent(&m_event)) {
+    ImGui_ImplSDL3_ProcessEvent(&m_event);
     switch (m_event.type) {
     case SDL_EVENT_QUIT:
       m_windowShouldClose = true;
@@ -75,7 +77,17 @@ void Context::Update() {
     }
   }
 
+  RenderUi();
   m_renderer.Render();
+}
+
+void Context::RenderUi() {
+  m_uiMan.Begin();
+  ImGui::Begin("Mase");
+  static float t = 0.0f;
+  ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
+  ImGui::End();
+  m_uiMan.End();
 }
 
 void Context::Init() {
@@ -88,15 +100,18 @@ void Context::Init() {
   getQueues();
   initVma();
   createSwapchain();
+  createCommandManager();
+  createDepthBuffer();
   createShaders();
   createPipeline();
-  createCommandManager();
   createRenderer();
-  createDepthBuffer();
   loadModel();
   createSDBuffers();
   updateSDBuffers();
+  createUiManager();
 }
+
+void Context::createUiManager() { m_uiMan.Init(); }
 
 void Context::createSDBuffers() {
   m_SDBufs.resize(MAX_FRAMES_IN_FLIGHT);
@@ -135,10 +150,8 @@ void Context::updateSDBuffers() {
   sd.view =
       glm::lookAt(glm::vec3(0.0f, 0.0f, 8.0f), glm::vec3(0.0f, 0.0f, 0.0f),
                   glm::vec3(0.0f, 1.0f, 0.0f));
-  for (auto i = 0; i < 3; i++) {
-    auto instancePos = glm::vec3((float)(i - 1) * 3.0f, 0.0f, 0.0f);
-    sd.model[i] = glm::mat4(1.0f);
-  }
+  auto instancePos = glm::vec3(0.0f, 0.0f, 0.0f);
+  sd.model = glm::mat4(1.0f);
 
   for (auto i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
     memcpy(m_SDBufs[i].allocInfo.pMappedData, &sd, sizeof(ShaderData));
@@ -152,7 +165,7 @@ void Context::loadModel() {
   std::vector<tinyobj::material_t> materials;
   std::string warn, err;
   if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err,
-                        "../Assets/models/suzanne.obj")) {
+                        "../Assets/models/miku.obj")) {
     throw std::runtime_error("load obj failed: " + warn + err);
   }
 
@@ -183,7 +196,6 @@ void Context::loadModel() {
 
   VkDeviceSize vBufSize = sizeof(Vertex) * vertices.size();
   VkDeviceSize iBufSize = sizeof(uint32_t) * indices.size();
-  m_bufSize = vBufSize;
 
   VkBufferCreateInfo bufferCI{.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                               .size = vBufSize + iBufSize,
@@ -225,6 +237,8 @@ void Context::createDepthBuffer() {
   if (depthFormat == vk::Format::eUndefined)
     throw std::runtime_error("no depth format available");
 
+  m_depth.format = VkFormat(depthFormat);
+
   auto extent = m_swapchain.GetExtent();
 
   vk::ImageCreateInfo depthImageCI;
@@ -253,7 +267,8 @@ void Context::createDepthBuffer() {
       .setViewType(vk::ImageViewType::e2D)
       .setFormat(depthFormat)
       .setSubresourceRange(vk::ImageSubresourceRange{}
-                               .setAspectMask(vk::ImageAspectFlagBits::eDepth)
+                               .setAspectMask(vk::ImageAspectFlagBits::eDepth |
+                                              vk::ImageAspectFlagBits::eStencil)
                                .setBaseMipLevel(0)
                                .setLevelCount(1)
                                .setBaseArrayLayer(0)

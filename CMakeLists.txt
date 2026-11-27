@@ -27,17 +27,27 @@ add_custom_command(
 
 add_custom_target(shaders ALL DEPENDS ${SHADER_SPV})
 
+file(GLOB IMGUI_SRC
+    ${CMAKE_SOURCE_DIR}/thirdparty/imgui/*.cpp
+    ${CMAKE_SOURCE_DIR}/thirdparty/imgui/backends/imgui_impl_vulkan.cpp
+    ${CMAKE_SOURCE_DIR}/thirdparty/imgui/backends/imgui_impl_sdl3.cpp
+)
+
 file(GLOB_RECURSE MASE_CORE_SOURCES CONFIGURE_DEPENDS
   Context/*.cpp
   Base/*.cpp
   Renderer/*.cpp
   Window/*.cpp
   Mase/*.cpp
+  UI/*.cpp
 )
-add_library(mase_core STATIC ${MASE_CORE_SOURCES})
+
+add_library(mase_core STATIC ${MASE_CORE_SOURCES} ${IMGUI_SRC})
 
 target_include_directories(mase_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/thirdparty/imgui
+  ${CMAKE_SOURCE_DIR}/thirdparty/imgui/backends
 )
 
 target_link_libraries(mase_core PUBLIC glm::glm SDL3::SDL3 Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator)

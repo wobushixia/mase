@@ -1,5 +1,7 @@
 #include "Renderer/Renderer.h"
 #include "Context/Context.h"
+#include "imgui.h"
+#include "imgui_impl_vulkan.h"
 #include "vulkan/vulkan.hpp"
 #include <cstdint>
 #include <stdexcept>
@@ -89,18 +91,38 @@ void Renderer::recordCommandBuffer(uint32_t imageInd) {
       vk::PipelineStageFlagBits2::eColorAttachmentOutput,
       vk::PipelineStageFlagBits2::eColorAttachmentOutput);
 
+  instance.m_swapchain.transitionImageLayout(
+      m_cmdBuf, instance.m_depth.img, vk::ImageLayout::eUndefined,
+      vk::ImageLayout::eDepthStencilAttachmentOptimal,
+      vk::ImageAspectFlagBits::eDepth | vk::ImageAspectFlagBits::eStencil,
+      vk::AccessFlagBits2::eNone,
+      vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+      vk::PipelineStageFlagBits2::eTopOfPipe,
+      vk::PipelineStageFlagBits2::eEarlyFragmentTests);
+
   vk::ClearValue clearColor = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 1.0f);
+  vk::ClearValue clearDepth = vk::ClearDepthStencilValue(1.0f, 0);
+
   vk::RenderingAttachmentInfo attachmentInfo;
   attachmentInfo.setImageView(instance.m_swapchain.m_imageViews[imageInd])
       .setImageLayout(vk::ImageLayout::eColorAttachmentOptimal)
       .setLoadOp(vk::AttachmentLoadOp::eClear)
       .setStoreOp(vk::AttachmentStoreOp::eStore)
       .setClearValue(clearColor);
+
   vk::RenderingInfo renderingInfo;
+  vk::RenderingAttachmentInfo depthAttachment;
+  depthAttachment.setImageView(Context::GetInstance().m_depth.imgView)
+      .setImageLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal)
+      .setLoadOp(vk::AttachmentLoadOp::eClear)
+      .setStoreOp(vk::AttachmentStoreOp::eDontCare)
+      .setClearValue(clearDepth);
+
   renderingInfo.setRenderArea({{0, 0}, instance.m_swapchain.GetExtent()})
       .setLayerCount(1)
       .setColorAttachmentCount(1)
-      .setPColorAttachments(&attachmentInfo);
+      .setPColorAttachments(&attachmentInfo)
+      .setPDepthAttachment(&depthAttachment);
 
   m_cmdBuf.beginRendering(&renderingInfo);
 
@@ -123,10 +145,32 @@ void Renderer::recordCommandBuffer(uint32_t imageInd) {
   vk::Buffer _vBuf = instance.vBuffer.buffer;
   m_cmdBuf.bindVertexBuffers(0, 1, &_vBuf, &offset);
 
-  m_cmdBuf.bindIndexBuffer(instance.vBuffer.buffer, instance.m_bufSize,
-                           vk::IndexType::eUint16);
+  vk::DeviceSize indexOffset = instance.vBuffer.indexOffset;
+  m_cmdBuf.bindIndexBuffer(instance.vBuffer.buffer, indexOffset,
+                           vk::IndexType::eUint32);
 
   m_cmdBuf.drawIndexed(instance.m_indexCount, 1, 0, 0, 0);
+
+  m_cmdBuf.endRendering();
+
+  vk::RenderingAttachmentInfo uiAtt{};
+  uiAtt.setImageView(instance.m_swapchain.m_imageViews[imageInd])
+      .setImageLayout(vk::ImageLayout::eColorAttachmentOptimal)
+      .setLoadOp(vk::AttachmentLoadOp::eLoad)
+      .setStoreOp(vk::AttachmentStoreOp::eStore);
+
+  vk::RenderingInfo uiRen{};
+  uiRen.setRenderArea({{0, 0}, instance.m_swapchain.GetExtent()})
+      .setLayerCount(1)
+      .setColorAttachmentCount(1)
+      .setPColorAttachments(&uiAtt);
+
+  m_cmdBuf.beginRendering(uiRen);
+  if (ImGui::GetDrawData()) {
+    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(),
+                                    static_cast<VkCommandBuffer>(m_cmdBuf));
+  }
+
   m_cmdBuf.endRendering();
 
   instance.m_swapchain.transitionImageLayout(

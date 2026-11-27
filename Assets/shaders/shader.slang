@@ -7,7 +7,7 @@ struct VSInput {
 struct ShaderData {
   float4x4 projection;
   float4x4 view;
-  float4x4 model[3];
+  float4x4 model;
   float4 lightPos;
 };
 
@@ -25,7 +25,7 @@ struct VSOutput {
 VSOutput main(VSInput input, uniform ShaderData *shaderData,
               uint instanceIndex: SV_VulkanInstanceID) {
   VSOutput output;
-  float4x4 modelMat = shaderData->model[instanceIndex];
+  float4x4 modelMat = shaderData->model;
   output.Normal = mul((float3x3)mul(shaderData->view, modelMat), input.Normal);
   output.UV = input.UV;
   output.Pos =
